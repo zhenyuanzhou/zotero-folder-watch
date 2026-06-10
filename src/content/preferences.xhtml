@@ -1,0 +1,50 @@
+<vbox xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+	xmlns:html="http://www.w3.org/1999/xhtml"
+	id="folderwatch-prefs">
+	<groupbox>
+		<label><html:h2>Folder Watch</html:h2></label>
+
+		<checkbox label="Enable folder monitoring"
+			preference="extensions.zotero.folderwatch.enabled"
+			native="true"/>
+
+		<label value="Watched folders:"/>
+		<richlistbox id="folderwatch-list"
+			style="height: 8em; margin: 4px 0;"/>
+		<hbox>
+			<button id="folderwatch-add" label="Add Folder…"
+				oncommand="FolderWatchPrefs.addFolder()"/>
+			<button id="folderwatch-remove" label="Remove Selected"
+				oncommand="FolderWatchPrefs.removeSelected()"/>
+		</hbox>
+		<hbox align="center">
+			<html:input type="text" id="folderwatch-manual"
+				placeholder="Or paste a folder path here"
+				style="flex: 1; min-width: 22em;"/>
+			<button id="folderwatch-add-manual" label="Add"
+				oncommand="FolderWatchPrefs.addManual()"/>
+		</hbox>
+
+		<hbox align="center">
+			<label value="Check for new files every"/>
+			<html:input type="number" min="5" max="3600"
+				style="width: 5em;"
+				preference="extensions.zotero.folderwatch.interval"/>
+			<label value="seconds"/>
+		</hbox>
+
+		<checkbox label="Automatically retrieve metadata for imported PDFs"
+			preference="extensions.zotero.folderwatch.recognize"
+			native="true"/>
+
+		<checkbox label="Scan subfolders too"
+			preference="extensions.zotero.folderwatch.subfolders"
+			native="true"/>
+
+		<checkbox label="File PDFs into collections matching their subfolder names"
+			preference="extensions.zotero.folderwatch.collections"
+			native="true"/>
+
+		<label value="New PDFs are imported into My Library. A file is imported once its size is stable, so in-progress downloads are skipped."/>
+	</groupbox>
+</vbox>

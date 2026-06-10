@@ -1,0 +1,17 @@
+{
+	"addons": {
+		"folderwatch@automanzzy": {
+			"updates": [
+				{
+					"version": "1.2.0",
+					"update_link": "https://github.com/zhenyuanzhou/zotero-folder-watch/releases/download/v1.2.0/zotero-folder-watch.xpi",
+					"applications": {
+						"zotero": {
+							"strict_min_version": "6.999"
+						}
+					}
+				}
+			]
+		}
+	}
+}

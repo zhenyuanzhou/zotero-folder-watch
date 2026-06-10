@@ -1,0 +1,8 @@
+pref("extensions.zotero.folderwatch.enabled", true);
+pref("extensions.zotero.folderwatch.path", "");
+pref("extensions.zotero.folderwatch.paths", "[]");
+pref("extensions.zotero.folderwatch.interval", 30);
+pref("extensions.zotero.folderwatch.recognize", true);
+pref("extensions.zotero.folderwatch.subfolders", true);
+pref("extensions.zotero.folderwatch.collections", true);
+pref("extensions.zotero.folderwatch.processed", "{}");
