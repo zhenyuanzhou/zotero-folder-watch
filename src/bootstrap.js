@@ -73,7 +73,10 @@ async function startup({ id, version, rootURI }) {
 			this.running = true;
 			log("watcher started (enabled=" + this.getPref("enabled")
 				+ ", paths=" + JSON.stringify(this.getPaths()) + ")");
-			while (this.running) {
+			// If another copy of this plugin starts (e.g. after an upgrade
+			// where shutdown was never called), it overwrites the token and
+			// this loop stops itself instead of running in parallel
+			while (this.running && Zotero.__folderWatchToken === this.token) {
 				let interval = 30;
 				try {
 					if (this.getPref("enabled")) {
@@ -87,6 +90,7 @@ async function startup({ id, version, rootURI }) {
 				}
 				await delay(Math.max(5, interval) * 1000);
 			}
+			log("watcher stopped");
 		},
 
 		stop() {
@@ -177,8 +181,34 @@ async function startup({ id, version, rootURI }) {
 				this.pending.delete(entry.key);
 
 				try {
+					// Re-read the bookkeeping right before importing and save
+					// immediately after, so even if another watcher instance
+					// is somehow alive, the window for a double import is
+					// effectively closed
+					processed = this.loadProcessed();
+					if (processed[entry.key] || processed[entry.relKey]) {
+						continue;
+					}
+
+					// Content check: the same file already imported under
+					// another name or from another folder is skipped too
+					let md5 = null;
+					try {
+						md5 = await Zotero.Utilities.Internal.md5Async(entry.path);
+					}
+					catch (e) {}
+					if (md5 && processed["md5:" + md5]) {
+						processed[entry.key] = true;
+						this.saveProcessed(processed);
+						continue;
+					}
+
 					await this.importFile(entry);
 					processed[entry.key] = true;
+					if (md5) {
+						processed["md5:" + md5] = true;
+					}
+					this.saveProcessed(processed);
 					importedNames.push(entry.name);
 					log("imported " + entry.path);
 				}
@@ -190,6 +220,11 @@ async function startup({ id, version, rootURI }) {
 			// Forget files that were removed from the folder, and stale
 			// pending entries, so the bookkeeping doesn't grow forever
 			for (let name of Object.keys(processed)) {
+				// md5 entries guard against re-importing identical content,
+				// so they're kept even after the original file disappears
+				if (name.startsWith("md5:")) {
+					continue;
+				}
 				if (!seen.has(name)) {
 					delete processed[name];
 				}
@@ -289,6 +324,11 @@ async function startup({ id, version, rootURI }) {
 		label: "Folder Watch",
 		image: rootURI + "icon.svg",
 	});
+
+	// Claim the singleton token; any previously running watcher loop (from
+	// an upgrade or a failed install) sees the token change and stops
+	FolderWatch.token = Date.now() + "-" + Math.random().toString(36).slice(2);
+	Zotero.__folderWatchToken = FolderWatch.token;
 
 	// Migrate the single-folder pref from versions before 1.2.0
 	if (!FolderWatch.getPaths().length) {
