@@ -5,4 +5,5 @@ pref("extensions.zotero.folderwatch.interval", 30);
 pref("extensions.zotero.folderwatch.recognize", true);
 pref("extensions.zotero.folderwatch.subfolders", true);
 pref("extensions.zotero.folderwatch.collections", true);
-pref("extensions.zotero.folderwatch.processed", "{}");
+pref("extensions.zotero.folderwatch.imported", "{}");
+pref("extensions.zotero.folderwatch.hashes", "{}");

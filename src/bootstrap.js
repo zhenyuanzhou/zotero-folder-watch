@@ -56,17 +56,17 @@ async function startup({ id, version, rootURI }) {
 			return [];
 		},
 
-		loadProcessed() {
+		loadJSON(key) {
 			try {
-				return JSON.parse(this.getPref("processed") || "{}");
+				return JSON.parse(this.getPref(key) || "{}");
 			}
 			catch (e) {
 				return {};
 			}
 		},
 
-		saveProcessed(map) {
-			Zotero.Prefs.set(this.prefKey("processed"), JSON.stringify(map), true);
+		saveJSON(key, obj) {
+			Zotero.Prefs.set(this.prefKey(key), JSON.stringify(obj), true);
 		},
 
 		async start() {
@@ -130,19 +130,57 @@ async function startup({ id, version, rootURI }) {
 				else if (stat.type === "regular"
 						&& name.toLowerCase().endsWith(".pdf")
 						&& stat.size > 0) {
-					let relKey = [...relParts, name].join("/");
 					out.push({
 						path,
 						name,
-						key: root + "|" + relKey,
-						// Bookkeeping key used by versions before multi-folder
-						// support; checked for migration
-						relKey,
+						key: root + "|" + [...relParts, name].join("/"),
 						folders: relParts,
 						size: stat.size,
 					});
 				}
 			}
+		},
+
+		// Build a map of the PDF content currently present in the library:
+		// md5 -> a live attachment item key. Hashes are cached by item key in
+		// the "hashes" pref so the whole library is only hashed once; after
+		// that each scan only hashes items added since the last scan.
+		async buildLibraryIndex() {
+			let libraryID = Zotero.Libraries.userLibraryID;
+			let cache = this.loadJSON("hashes");
+			let freshCache = {};
+			let byMd5 = {};
+
+			let items = await Zotero.Items.getAll(libraryID, false, false);
+			let hashedThisScan = 0;
+			for (let item of items) {
+				if (!item.isPDFAttachment() || item.deleted) {
+					continue;
+				}
+				let itemKey = item.key;
+				let md5 = cache[itemKey];
+				if (!md5) {
+					try {
+						md5 = await item.attachmentHash;
+						hashedThisScan++;
+					}
+					catch (e) {
+						continue;
+					}
+				}
+				if (md5) {
+					freshCache[itemKey] = md5;
+					if (!byMd5[md5]) {
+						byMd5[md5] = itemKey;
+					}
+				}
+			}
+
+			this.saveJSON("hashes", freshCache);
+			if (hashedThisScan > 50) {
+				log("hashed " + hashedThisScan + " library attachments");
+			}
+			return byMd5;
 		},
 
 		async scan() {
@@ -151,29 +189,47 @@ async function startup({ id, version, rootURI }) {
 				return;
 			}
 
-			let processed = this.loadProcessed();
+			let libraryID = Zotero.Libraries.userLibraryID;
+
+			// What content is in the library right now. This is the source of
+			// truth: if a file's content isn't here, it gets (re)imported —
+			// so deleting an item in Zotero brings it back; if it is here, the
+			// file is skipped — so nothing is ever imported twice.
+			let liveByMd5 = await this.buildLibraryIndex();
+
+			// Map of disk path -> the library item key we placed it as, pruned
+			// to entries whose item is still alive. A live path entry lets us
+			// skip re-hashing a file we've already handled.
+			let imported = this.loadJSON("imported");
+			let livePaths = {};
+			for (let fileKey of Object.keys(imported)) {
+				let item = Zotero.Items.getByLibraryAndKey(libraryID, imported[fileKey]);
+				if (item && !item.deleted) {
+					livePaths[fileKey] = imported[fileKey];
+				}
+			}
+			imported = livePaths;
+
 			let entries = [];
 			for (let root of roots) {
 				if (await IOUtils.exists(root)) {
 					await this.collectPDFs(root, root, [], entries);
 				}
 			}
+
 			let seen = new Set();
 			let importedNames = [];
 
 			for (let entry of entries) {
 				seen.add(entry.key);
 
-				if (processed[entry.key]) {
-					continue;
-				}
-				// Imported by a pre-multi-folder version: adopt the new key
-				if (processed[entry.relKey]) {
-					processed[entry.key] = true;
+				// Path already placed as a live item — nothing to do
+				if (imported[entry.key]) {
 					continue;
 				}
 
-				// Wait until the size is unchanged since the previous scan
+				// Wait until the size is unchanged since the previous scan, so
+				// in-progress downloads/copies aren't imported half-written
 				if (this.pending.get(entry.key) !== entry.size) {
 					this.pending.set(entry.key, entry.size);
 					continue;
@@ -181,34 +237,30 @@ async function startup({ id, version, rootURI }) {
 				this.pending.delete(entry.key);
 
 				try {
-					// Re-read the bookkeeping right before importing and save
-					// immediately after, so even if another watcher instance
-					// is somehow alive, the window for a double import is
-					// effectively closed
-					processed = this.loadProcessed();
-					if (processed[entry.key] || processed[entry.relKey]) {
-						continue;
-					}
-
-					// Content check: the same file already imported under
-					// another name or from another folder is skipped too
 					let md5 = null;
 					try {
 						md5 = await Zotero.Utilities.Internal.md5Async(entry.path);
 					}
 					catch (e) {}
-					if (md5 && processed["md5:" + md5]) {
-						processed[entry.key] = true;
-						this.saveProcessed(processed);
+
+					// Content already in the library (possibly under a different
+					// name, folder, or added by hand) — just remember the
+					// mapping, don't import a duplicate
+					if (md5 && liveByMd5[md5]) {
+						imported[entry.key] = liveByMd5[md5];
+						this.saveJSON("imported", imported);
 						continue;
 					}
 
-					await this.importFile(entry);
-					processed[entry.key] = true;
+					let attachment = await this.importFile(entry);
+					imported[entry.key] = attachment.key;
 					if (md5) {
-						processed["md5:" + md5] = true;
+						liveByMd5[md5] = attachment.key;
+						let cache = this.loadJSON("hashes");
+						cache[attachment.key] = md5;
+						this.saveJSON("hashes", cache);
 					}
-					this.saveProcessed(processed);
+					this.saveJSON("imported", imported);
 					importedNames.push(entry.name);
 					log("imported " + entry.path);
 				}
@@ -217,25 +269,19 @@ async function startup({ id, version, rootURI }) {
 				}
 			}
 
-			// Forget files that were removed from the folder, and stale
-			// pending entries, so the bookkeeping doesn't grow forever
-			for (let name of Object.keys(processed)) {
-				// md5 entries guard against re-importing identical content,
-				// so they're kept even after the original file disappears
-				if (name.startsWith("md5:")) {
-					continue;
-				}
-				if (!seen.has(name)) {
-					delete processed[name];
+			// Drop path mappings and pending entries for files no longer on
+			// disk, so the bookkeeping doesn't grow without bound
+			for (let key of Object.keys(imported)) {
+				if (!seen.has(key)) {
+					delete imported[key];
 				}
 			}
-			for (let name of this.pending.keys()) {
-				if (!seen.has(name)) {
-					this.pending.delete(name);
+			for (let key of this.pending.keys()) {
+				if (!seen.has(key)) {
+					this.pending.delete(key);
 				}
 			}
-
-			this.saveProcessed(processed);
+			this.saveJSON("imported", imported);
 
 			if (importedNames.length) {
 				this.notify(importedNames);

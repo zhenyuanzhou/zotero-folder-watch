@@ -1,7 +1,9 @@
 # Zotero Folder Watch
 
-A Zotero 7 plugin that monitors a folder of your choice and automatically
-imports any new PDF into your Zotero library — no more adding files by hand.
+A Zotero plugin (compatible with Zotero 7–9) that keeps your library in sync
+with one or more folders on disk: any PDF in a watched folder is imported, and
+the library is kept as a mirror of those folders — no more adding files by
+hand.
 
 ## Install
 
@@ -33,13 +35,32 @@ imports any new PDF into your Zotero library — no more adding files by hand.
 - Each PDF is imported as a stored copy into **My Library**. If
   "retrieve metadata" is enabled, Zotero's built-in PDF recognizer runs and
   creates a proper parent item (title, authors, DOI, …) when it can.
-- Already-imported files are remembered by filename, so the same file is not
-  imported twice. The original file stays in the watched folder — you can
-  delete it afterwards if you like.
 
-Note: on first enable, all PDFs already in the folder are treated as new and
-imported. Point the plugin at an empty or dedicated folder if you don't want
-that.
+### Mirror model (no duplicates, deletions come back)
+
+The plugin matches files to library items by **content hash (MD5)**, not by
+filename, and treats the library as a mirror of the watched folders:
+
+- **Never imports duplicates.** If a file's content is already in the library
+  — even under a different name, in a different folder, or added by hand — it
+  is skipped. Identical copies of the same PDF only ever produce one item.
+- **Restores accidental deletions.** If you delete an item in Zotero but its
+  file is still in a watched folder, the next scan re-imports it. To remove
+  something permanently, delete the file from the folder too.
+
+The first scan after installing this version hashes the existing library once
+to learn what's already there (this can take a while for large libraries);
+after that, hashes are cached and only new files are hashed.
+
+Note: on first enable, all PDFs already in a watched folder are imported.
+Point the plugin at a dedicated folder if you don't want that.
+
+### Cleaning up earlier duplicates
+
+If an earlier version created duplicate items, run
+[`tools/cleanup-duplicates.js`](tools/cleanup-duplicates.js) once via
+**Tools → Developer → Run JavaScript** (tick "Run as async function"). It
+moves byte-identical duplicates to the Trash, keeping the oldest copy.
 
 ## Build from source
 
